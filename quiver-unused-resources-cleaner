@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+
+readonly VERSION="1.0"
+
+readonly CMD_NAME="$(basename "$0")"
+readonly QUIVER_LIBRARY_EXT="qvlibrary"
+
+dry_run=false
+uses_trash=false
+
+show_usage() {
+    echo ""
+    echo "${CMD_NAME}, version ${VERSION}"
+    echo ""
+    echo "This program cleans unused resources (e.g. images) from your qvlibrary."
+    echo ""
+    echo "Usage: ${CMD_NAME} [--dry-run] [--help] [--trash] <your qvlibrary path>"
+    echo ""
+    echo "    -n, --dry-run    Don't actually remove/move-to-trash anything, just show what would be done."
+    echo "    -t, --trash      Don't remove unused resources, but move to trash."
+    echo "    -h, --help       Show brief usage of ${CMD_NAME}".
+}
+
+parse_args() {
+    for arg in "$@"; do
+        shift
+        case "$arg" in
+        "--help") set -- "$@" "-h" ;;
+        "--dry-run") set -- "$@" "-n" ;;
+        "--trash") set -- "$@" "-t" ;;
+        *) set -- "$@" "$arg" ;;
+        esac
+    done
+
+    while getopts "nth" opt; do
+        case "$opt" in
+        "n")
+            dry_run=true
+            ;;
+        "t")
+            if ! command -v trash &>/dev/null; then
+                echo "Error: The 'trash' command not found. Please install it from https://github.com/ali-rantakari/trash if you specify --trash/-t option."
+                exit 1
+            fi
+            uses_trash=true
+            ;;
+        "h")
+            show_usage
+            exit 0
+            ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+
+    quiver_lib_path=$1
+}
+
+check_parsed_args() {
+    if [ ! -v quiver_lib_path ]; then
+        echo "Error: Please specify a path of a qvlibrary which has unused images."
+        show_usage
+        exit 1
+    elif [ ! -d "${quiver_lib_path}" ] || [ "${quiver_lib_path##*.}" != "${QUIVER_LIBRARY_EXT}" ]; then
+        echo "Error: Invalid qvlibrary path: ${quiver_lib_path}"
+        show_usage
+        exit 1
+    fi
+}
+
+remove_resources() {
+    for path in $@; do
+        res_name=$(basename ${path})
+
+        if ! grep -r -m1 -q "${res_name}" "${quiver_lib_path}"; then
+            if ${dry_run}; then
+                if ${uses_trash}; then
+                    echo "Would move to trash: ${path}"
+                else
+                    echo "Would remove: ${path}"
+                fi
+            elif ${uses_trash}; then
+                echo "Moving to trash: ${path}"
+                trash "${path}"
+            else
+                echo "Removing: ${path}"
+                rm -f "${path}"
+            fi
+        fi
+    done
+}
+
+parse_args $@
+check_parsed_args
+
+readonly DEPTH_OF_RES_DIR_FROM_QVLIB_ROOT=4
+res_paths=$(
+    find \
+        ${quiver_lib_path} \
+        -path *.qvnotebook/*.qvnote/resources/* \
+        -maxdepth ${DEPTH_OF_RES_DIR_FROM_QVLIB_ROOT}
+)
+
+remove_resources $res_paths
